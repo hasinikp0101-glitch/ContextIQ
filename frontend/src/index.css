@@ -1,0 +1,113 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+
+  /* Dark neutral surfaces, GitHub/Linear inspired */
+  --color-canvas: #0b0e14;
+  --color-deep: #080b10;
+  --color-panel: #11151c;
+  --color-panel-2: #161b24;
+  --color-panel-3: #1b2230;
+  --color-edge: #1f2632;
+  --color-edge-strong: #2c3546;
+
+  --color-ink: #e2e7ef;
+  --color-ink-muted: #97a1b2;
+  --color-ink-faint: #5d6779;
+
+  /* Restrained accent + status colors */
+  --color-accent: #4493f8;
+  --color-accent-hover: #5da2f9;
+  --color-accent-soft: #152238;
+  --color-ok: #3fb950;
+  --color-ok-soft: #12261a;
+  --color-warn: #d29922;
+  --color-warn-soft: #2a2113;
+  --color-danger: #f85149;
+  --color-danger-soft: #2d1517;
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-canvas font-sans text-[13px] text-ink antialiased;
+  }
+
+  ::selection {
+    background: rgba(68, 147, 248, 0.35);
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-edge-strong) transparent;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-lg border border-edge bg-panel;
+  }
+
+  .card-header {
+    @apply flex h-10 shrink-0 items-center justify-between gap-2 border-b border-edge px-4;
+  }
+
+  .card-title {
+    @apply text-[11px] font-semibold uppercase tracking-[0.07em] text-ink-muted;
+  }
+
+  .card-body {
+    @apply p-4;
+  }
+
+  .field-label {
+    @apply mb-1.5 block text-[11px] font-medium uppercase tracking-[0.06em] text-ink-faint;
+  }
+
+  .input {
+    @apply w-full rounded-md border border-edge bg-panel-2 px-3 py-2 text-[13px] text-ink outline-none transition-colors placeholder:text-ink-faint focus:border-accent/70 focus:ring-2 focus:ring-accent/15;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-md px-3.5 py-2 text-[13px] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-45;
+  }
+
+  .btn-primary {
+    @apply bg-accent text-white hover:bg-accent-hover disabled:hover:bg-accent;
+  }
+
+  .btn-secondary {
+    @apply border border-edge-strong bg-panel-2 text-ink hover:border-accent/50 hover:bg-panel-3;
+  }
+
+  .chip {
+    @apply inline-flex max-w-full items-center gap-1 rounded border border-edge bg-panel-2 px-1.5 py-0.5 font-mono text-[11px] leading-4 text-ink-muted;
+  }
+
+  .chip-accent {
+    @apply border-accent/30 bg-accent-soft text-accent;
+  }
+
+  .chip-ok {
+    @apply border-ok/30 bg-ok-soft text-ok;
+  }
+
+  .chip-danger {
+    @apply border-danger/30 bg-danger-soft text-danger;
+  }
+
+  .stat-label {
+    @apply text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-faint;
+  }
+
+  .error-banner {
+    @apply flex items-start gap-2 rounded-md border border-danger/40 bg-danger-soft px-3 py-2.5 text-[12px] leading-relaxed text-ink;
+  }
+}
