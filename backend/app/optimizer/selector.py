@@ -18,6 +18,13 @@ DEFAULT_MAX_READ_BYTES = 1_048_576
 _BINARY_PROBE_BYTES = 8192
 _DEFAULT_ENCODING_NAME = "cl100k_base"
 
+_SENSITIVE_FILENAMES = {
+    ".env",
+    ".env.local",
+    ".env.development",
+    ".env.production",
+    ".env.test",
+}
 
 @dataclass
 class SelectedFile:
@@ -112,6 +119,16 @@ class ContextSelector:
 
         for candidate in candidates:
             path, score = _candidate_fields(candidate)
+            if score <= 0:
+                excluded.append(
+                    ExcludedFile(
+                        path=path,
+                        relevance_score=score,
+                        token_count=None,
+                        reason="no relevance to query",
+                    )
+                )
+                continue
             loaded = self._load_candidate(root, path)
 
             if loaded.error is not None:
@@ -164,6 +181,9 @@ class ContextSelector:
         target = _safe_resolve(project_root, relative_path)
         if target is None:
             return _LoadedFile(error="path is outside the project root or is invalid")
+
+        if target.name.lower() in _SENSITIVE_FILENAMES:
+            return _LoadedFile(error="sensitive file was not selected")
 
         if not target.exists() or not target.is_file():
             return _LoadedFile(error="file not found or is not a regular file")

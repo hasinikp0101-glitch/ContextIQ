@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, status
 
 from app.analyzer import CodeAnalyzer
 from app.compressor import CompressorOptions, ContextCompressor
+from app.llm import FeatherlessClient
 from app.metrics import MetricsEngine, PricingConfig
 from app.optimizer import ContextSelector
 from app.relevance import QueryAnalyzer, RelevanceScorer
@@ -20,6 +21,8 @@ from .schemas import (
     FileAnalysisItem,
     FilteredFileItem,
     HealthResponse,
+    LLMAskRequest,
+    LLMAskResponse,
     MetricsResponse,
     ProjectAnalyzeRequest,
     ProjectAnalyzeResponse,
@@ -227,3 +230,29 @@ def optimize_context(request: ContextOptimizeRequest) -> ContextOptimizeResponse
         total_selected=len(selected_files),
         total_excluded=len(excluded_files),
     )
+
+
+@router.post(
+    "/llm/ask",
+    response_model=LLMAskResponse,
+    status_code=status.HTTP_200_OK,
+)
+def ask_llm(request: LLMAskRequest) -> LLMAskResponse:
+    """Ask the LLM a debugging question with optimized context."""
+    try:
+        # Initialize Featherless client (reads API key from environment)
+        client = FeatherlessClient()
+        response = client.ask(request.optimized_context, request.query)
+        return LLMAskResponse(answer=response.answer, files_used=response.files_used)
+    except ValueError as e:
+        # API key not configured
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(e),
+        ) from e
+    except RuntimeError as e:
+        # API or network error
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(e),
+        ) from e

@@ -194,3 +194,28 @@ class ContextOptimizeResponse(BaseModel):
     total_candidates: int
     total_selected: int
     total_excluded: int
+
+
+# ---------------------------------------------------------------------------
+# LLM Schemas
+# ---------------------------------------------------------------------------
+
+
+class LLMAskRequest(BaseModel):
+    """Request payload for /api/llm/ask."""
+
+    optimized_context: str = Field(
+        ...,
+        description="The optimized context from ContextForge.",
+    )
+    query: str = Field(
+        ...,
+        description="The developer debugging question.",
+    )
+
+
+class LLMAskResponse(BaseModel):
+    """Response payload for /api/llm/ask."""
+
+    answer: str
+    files_used: list[str] = Field(default_factory=list)

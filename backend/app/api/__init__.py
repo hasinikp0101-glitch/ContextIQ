@@ -5,6 +5,8 @@ from .schemas import (
     ContextOptimizeRequest,
     ContextOptimizeResponse,
     HealthResponse,
+    LLMAskRequest,
+    LLMAskResponse,
     ProjectAnalyzeRequest,
     ProjectAnalyzeResponse,
 )
@@ -14,6 +16,8 @@ __all__ = [
     "ContextOptimizeRequest",
     "ContextOptimizeResponse",
     "HealthResponse",
+    "LLMAskRequest",
+    "LLMAskResponse",
     "ProjectAnalyzeRequest",
     "ProjectAnalyzeResponse",
 ]

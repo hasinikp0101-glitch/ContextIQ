@@ -6,17 +6,19 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import MagicMock
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND_ROOT))
 
 from fastapi import HTTPException
 
-from app.api.routes import analyze_project, health_check, optimize_context
+from app.api.routes import analyze_project, ask_llm, health_check, optimize_context
 from app.api.schemas import (
     CompressorOptionsRequest,
     ContextOptimizeRequest,
     HealthResponse,
+    LLMAskRequest,
     PricingConfigRequest,
     ProjectAnalyzeRequest,
 )
@@ -170,14 +172,21 @@ class ApiEndpointTests(unittest.TestCase):
 
     def test_07_context_optimize_empty_query(self) -> None:
         _write(self.root, "app.py", "print('hello world')\n")
+
         req = ContextOptimizeRequest(
             project_path=str(self.root),
             query="",
             token_budget=1000,
         )
+
         res = optimize_context(req)
-        self.assertEqual(res.total_selected, 1)
-        self.assertIn("app.py", res.selected_files[0].path)
+
+        self.assertEqual(res.total_selected, 0)
+        self.assertEqual(res.total_excluded, 1)
+        self.assertEqual(
+            res.excluded_files[0].reason,
+            "no relevance to query",
+        )
 
     def test_08_context_optimize_zero_budget(self) -> None:
         _write(self.root, "app.py", "print('hello world')\n")
@@ -243,6 +252,59 @@ class ApiEndpointTests(unittest.TestCase):
             req.pricing.input_price_per_1k_tokens,
             reloaded.pricing.input_price_per_1k_tokens,
         )
+
+    def test_13_llm_ask_missing_api_key(self) -> None:
+        """Test LLM endpoint when API key is not configured."""
+        # Ensure API key is not set
+        import os
+        original_key = os.environ.get("FEATHERLESS_API_KEY")
+        if "FEATHERLESS_API_KEY" in os.environ:
+            del os.environ["FEATHERLESS_API_KEY"]
+
+        try:
+            req = LLMAskRequest(
+                optimized_context="===== FILE: test.py =====\ncode",
+                query="test question",
+            )
+            with self.assertRaises(HTTPException) as ctx:
+                ask_llm(req)
+            self.assertEqual(ctx.exception.status_code, 503)
+            self.assertIn("API key not configured", ctx.exception.detail)
+        finally:
+            # Restore original key if it existed
+            if original_key:
+                os.environ["FEATHERLESS_API_KEY"] = original_key
+
+    def test_14_llm_ask_with_mock(self) -> None:
+        """Test LLM endpoint with mocked API call."""
+        from unittest.mock import patch
+        import os
+
+        # Set a test API key
+        os.environ["FEATHERLESS_API_KEY"] = "test-key"
+
+        try:
+            with patch("app.llm.featherless_client.OpenAI") as mock_openai:
+                # Mock the OpenAI client and response
+                mock_client = MagicMock()
+                mock_response = MagicMock()
+                mock_response.choices = [MagicMock()]
+                mock_response.choices[0].message.content = "Mocked answer"
+                mock_client.chat.completions.create.return_value = mock_response
+                mock_openai.return_value = mock_client
+
+                req = LLMAskRequest(
+                    optimized_context="===== FILE: test.py =====\ncode",
+                    query="test question",
+                )
+                res = ask_llm(req)
+
+                self.assertEqual(res.answer, "Mocked answer")
+                self.assertIn("test.py", res.files_used)
+        finally:
+            # Clean up
+            if "FEATHERLESS_API_KEY" in os.environ:
+                del os.environ["FEATHERLESS_API_KEY"]
 
 
 if __name__ == "__main__":

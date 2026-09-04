@@ -1,7 +1,8 @@
 """Weighted, explainable relevance ranking over Code Analyzer metadata.
 
 The scorer never executes code and never calls an LLM. Each file gets five
-normalized signal scores (0-100) that are combined with fixed weights.
+normalized signal scores (0-100) that are combined with fixed weights,
+followed by a small developer-aware file-role adjustment.
 """
 
 from __future__ import annotations
@@ -24,6 +25,34 @@ WEIGHT_QUERY_TERMS = 0.20
 WEIGHT_INTENT = 0.10
 
 _EXTENSIONS = {".py", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".json"}
+
+_IMPLEMENTATION_PATH_MARKERS = {
+    "app",
+    "src",
+    "lib",
+    "core",
+    "service",
+    "services",
+    "api",
+    "backend",
+}
+
+_TEST_PATH_MARKERS = {
+    "test",
+    "tests",
+    "__tests__",
+    "spec",
+}
+
+# Queries that normally ask about implementation/debugging rather than
+# testing behavior. These are deliberately explicit and deterministic.
+_IMPLEMENTATION_INTENTS = {
+    "debugging",
+    "implementation",
+    "architecture",
+    "explanation",
+    "code",
+}
 
 
 @dataclass
@@ -108,6 +137,7 @@ class RelevanceScorer:
         )
 
         path_score = _filename_boost(path_score, query_terms, path)
+
         final = _weighted_total(
             path_score,
             import_score,
@@ -115,6 +145,15 @@ class RelevanceScorer:
             query_score,
             intent_score,
         )
+
+        # Developer-aware role adjustment.
+        role_adjustment, role_signal = _file_role_adjustment(
+            path=path,
+            intent=analysis.intent,
+            query_terms=query_terms,
+        )
+
+        final = max(0, min(100, final + role_adjustment))
 
         matched = _build_matched_signals(
             path=path,
@@ -128,10 +167,21 @@ class RelevanceScorer:
             intent_hits=intent_hits,
             intent=analysis.intent,
         )
-        reason = _reason(matched, final, analysis.intent)
+
+        if role_signal:
+            matched.append(role_signal)
+
+        reason = _reason(
+            matched,
+            final,
+            analysis.intent,
+            role_adjustment,
+        )
 
         if file_data["analysis_error"]:
-            matched.append("code analysis reported an error; scored from available metadata")
+            matched.append(
+                "code analysis reported an error; scored from available metadata"
+            )
 
         return RankedFile(
             path=path,
@@ -160,6 +210,7 @@ def _as_file(file_analysis: FileAnalysis | dict[str, Any]) -> dict[str, Any]:
         data = dict(file_analysis)
     else:
         data = {}
+
     return {
         "path": str(data.get("path") or ""),
         "imports": list(data.get("imports") or []),
@@ -187,18 +238,26 @@ def _weighted_total(
         + query_score * WEIGHT_QUERY_TERMS
         + intent_score * WEIGHT_INTENT
     )
+
     return max(0, min(100, int(round(total))))
 
 
-def _coverage_score(query_terms: list[str], candidates: set[str]) -> tuple[int, list[str]]:
+def _coverage_score(
+    query_terms: list[str],
+    candidates: set[str],
+) -> tuple[int, list[str]]:
     """Share of query terms that match candidate tokens, counting each term once."""
     if not query_terms:
         return 0, []
+
     hits: list[str] = []
+
     for term in query_terms:
         if _term_matches(term, candidates):
             hits.append(term)
+
     score = int(round(100.0 * len(hits) / len(query_terms)))
+
     return max(0, min(100, score)), hits
 
 
@@ -209,6 +268,7 @@ def _term_matches(term: str, candidates: set[str]) -> bool:
     or a multi-word phrase whose words all appear as exact tokens.
     """
     normalized = term.lower().strip()
+
     if not normalized or not candidates:
         return False
 
@@ -217,68 +277,236 @@ def _term_matches(term: str, candidates: set[str]) -> bool:
     if " " in normalized:
         if normalized in lowered:
             return True
+
         words = [word for word in normalized.split() if word]
-        if words and all(_exact_or_related(word, lowered) for word in words):
+
+        if words and all(
+            _exact_or_related(word, lowered)
+            for word in words
+        ):
             return True
 
     return _exact_or_related(normalized, lowered)
 
 
-def _exact_or_related(term: str, candidates: set[str]) -> bool:
+def _exact_or_related(
+    term: str,
+    candidates: set[str],
+) -> bool:
     """True when the term or a concept-map relative equals a candidate token."""
-    needles = {token.lower() for token in related_tokens(term) if len(token) >= 2}
+    needles = {
+        token.lower()
+        for token in related_tokens(term)
+        if len(token) >= 2
+    }
+
     needles.add(term.lower())
+
     return bool(needles & candidates)
 
 
-def _intent_score(analysis: QueryAnalysis, candidates: set[str]) -> tuple[int, list[str]]:
+def _intent_score(
+    analysis: QueryAnalysis,
+    candidates: set[str],
+) -> tuple[int, list[str]]:
     domains = [analysis.intent, *analysis.topics]
+
     wanted: set[str] = set()
+
     for domain in domains:
-        wanted |= {token.lower() for token in DOMAIN_TOKENS.get(domain, set())}
+        wanted |= {
+            token.lower()
+            for token in DOMAIN_TOKENS.get(domain, set())
+        }
+
     if not wanted:
         return 0, []
-    hits = sorted(token for token in wanted if token in candidates or _term_matches(token, candidates))
-    # Unique domain hits, not frequency. Cap so a few strong tokens score high.
+
+    hits = sorted(
+        token
+        for token in wanted
+        if token in candidates or _term_matches(token, candidates)
+    )
+
     if not hits:
         return 0, []
-    score = max(0, min(100, 40 + 20 * min(len(hits), 3)))
+
+    score = max(
+        0,
+        min(100, 40 + 20 * min(len(hits), 3)),
+    )
+
     return score, hits[:8]
 
 
-def _filename_boost(path_score: int, query_terms: list[str], path: str) -> int:
+def _filename_boost(
+    path_score: int,
+    query_terms: list[str],
+    path: str,
+) -> int:
     stem = Path(path).stem.lower()
+
     if not stem:
         return path_score
-    stem_tokens = {stem, *_split_identifier(stem)}
+
+    stem_tokens = {
+        stem,
+        *_split_identifier(stem),
+    }
+
     for term in query_terms:
         if _term_matches(term, stem_tokens):
-            return max(path_score, min(100, path_score + 25))
+            return max(
+                path_score,
+                min(100, path_score + 25),
+            )
+
     return path_score
 
 
-def _path_tokens(path: str) -> set[str]:
-    posix = path.replace("\\", "/")
-    parts: list[str] = []
-    for piece in posix.split("/"):
+def _file_role_adjustment(
+    path: str,
+    intent: str,
+    query_terms: list[str],
+) -> tuple[int, str | None]:
+    """Apply a small deterministic adjustment based on developer file role.
+
+    Implementation files receive a modest boost for implementation/debugging
+    questions. Test files receive a modest penalty in those cases.
+
+    Explicit test-related queries do not receive the penalty.
+    """
+    components = _path_components(path)
+
+    is_test = _is_test_path(components)
+    is_implementation = _is_implementation_path(components)
+
+    test_query = _is_test_query(query_terms)
+
+    if test_query:
+        if is_test:
+            return 8, "file is test-focused and matches a test-related query"
+        return 0, None
+
+    if intent not in _IMPLEMENTATION_INTENTS:
+        return 0, None
+
+    if is_implementation and not is_test:
+        return 8, "implementation file prioritized for developer query"
+
+    if is_test:
+        return -8, "test file deprioritized for implementation-focused query"
+
+    return 0, None
+
+
+def _path_components(path: str) -> set[str]:
+    """Return normalized path components without file extensions."""
+    normalized = path.replace("\\", "/")
+
+    components: set[str] = set()
+
+    for piece in normalized.split("/"):
+        if not piece:
+            continue
+
         suffix = Path(piece).suffix.lower()
-        stem = Path(piece).stem if suffix in _EXTENSIONS else piece
+
+        if suffix:
+            piece = Path(piece).stem
+
+        components.update(
+            token.lower()
+            for token in _split_identifier(piece)
+            if token
+        )
+
+    return components
+
+
+def _is_test_path(components: set[str]) -> bool:
+    """Return True when a path clearly belongs to test/spec infrastructure."""
+    return bool(components & _TEST_PATH_MARKERS)
+
+
+def _is_implementation_path(components: set[str]) -> bool:
+    """Return True when a path clearly belongs to application code."""
+    return bool(components & _IMPLEMENTATION_PATH_MARKERS)
+
+
+def _is_test_query(query_terms: list[str]) -> bool:
+    """Detect explicit test-oriented queries."""
+    test_terms = {
+        "test",
+        "tests",
+        "testing",
+        "pytest",
+        "unittest",
+        "spec",
+        "specs",
+        "coverage",
+        "assertion",
+        "assertions",
+        "fixture",
+        "fixtures",
+    }
+
+    return any(
+        term.lower() in test_terms
+        for term in query_terms
+    )
+
+
+def _path_tokens(path: str) -> set[str]:
+    normalized = path.replace("\\", "/")
+
+    parts: list[str] = []
+
+    for piece in normalized.split("/"):
+        suffix = Path(piece).suffix.lower()
+
+        stem = (
+            Path(piece).stem
+            if suffix in _EXTENSIONS
+            else piece
+        )
+
         parts.extend(_split_identifier(stem))
+
         if suffix == ".sql":
             parts.append("sql")
-    return {part for part in parts if part and len(part) > 1}
+
+    return {
+        part
+        for part in parts
+        if part and len(part) > 1
+    }
 
 
 def _import_tokens(imports: list[str]) -> set[str]:
     tokens: set[str] = set()
+
     for item in imports:
         raw = str(item).replace("\\", "/").lower()
+
         tokens.add(raw)
+
         name = raw.rsplit("/", 1)[-1]
         name = name.rsplit(".", 1)[0]
+
         tokens.update(_split_identifier(name))
-        tokens.update(_split_identifier(raw.replace(".", " ").replace("/", " ")))
-    return {token for token in tokens if token and len(token) > 1}
+
+        tokens.update(
+            _split_identifier(
+                raw.replace(".", " ").replace("/", " ")
+            )
+        )
+
+    return {
+        token
+        for token in tokens
+        if token and len(token) > 1
+    }
 
 
 def _symbol_tokens(
@@ -287,24 +515,58 @@ def _symbol_tokens(
     symbols: list[str],
     exports: list[str],
 ) -> tuple[set[str], list[str]]:
-    names = _unique([str(item) for item in functions + classes + symbols + exports])
+    names = _unique(
+        [
+            str(item)
+            for item in functions
+            + classes
+            + symbols
+            + exports
+        ]
+    )
+
     tokens: set[str] = set()
+
     for name in names:
         tokens.add(name.lower())
         tokens.update(_split_identifier(name))
-    return {token for token in tokens if token and len(token) > 1}, names
+
+    return {
+        token
+        for token in tokens
+        if token and len(token) > 1
+    }, names
 
 
 def _split_identifier(name: str) -> list[str]:
-    cleaned = name.replace("-", " ").replace("_", " ").replace(".", " ")
+    cleaned = (
+        name
+        .replace("-", " ")
+        .replace("_", " ")
+        .replace(".", " ")
+    )
+
     pieces: list[str] = []
+
     for chunk in cleaned.split():
-        parts = re.findall(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])|\d+", chunk)
+        parts = re.findall(
+            r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])|\d+",
+            chunk,
+        )
+
         if parts:
-            pieces.extend(part.lower() for part in parts)
+            pieces.extend(
+                part.lower()
+                for part in parts
+            )
         else:
             pieces.append(chunk.lower())
-    return [piece for piece in pieces if piece]
+
+    return [
+        piece
+        for piece in pieces
+        if piece
+    ]
 
 
 def _build_matched_signals(
@@ -320,72 +582,131 @@ def _build_matched_signals(
     intent: str,
 ) -> list[str]:
     evidence: list[str] = []
+
     posix = path.replace("\\", "/")
+
     for term in path_hits:
         for part in posix.split("/"):
             part_tokens = _path_tokens(part)
+
             if _term_matches(term, part_tokens):
-                evidence.append(f"path contains '{part}'")
+                evidence.append(
+                    f"path contains '{part}'"
+                )
                 break
         else:
-            evidence.append(f"path matches query term '{term}'")
+            evidence.append(
+                f"path matches query term '{term}'"
+            )
 
     for term in import_hits:
-        matched_import = _best_import(term, import_values)
+        matched_import = _best_import(
+            term,
+            import_values,
+        )
+
         if matched_import:
-            evidence.append(f"imports '{matched_import}'")
+            evidence.append(
+                f"imports '{matched_import}'"
+            )
         else:
-            evidence.append(f"import metadata matches '{term}'")
+            evidence.append(
+                f"import metadata matches '{term}'"
+            )
 
     for term in symbol_hits:
-        matched_symbol = _best_symbol(term, symbol_names)
+        matched_symbol = _best_symbol(
+            term,
+            symbol_names,
+        )
+
         if matched_symbol:
-            evidence.append(f"symbol '{matched_symbol}' matches {term} concept")
+            evidence.append(
+                f"symbol '{matched_symbol}' matches {term} concept"
+            )
         else:
-            evidence.append(f"symbol metadata matches '{term}'")
+            evidence.append(
+                f"symbol metadata matches '{term}'"
+            )
 
     for token in intent_hits:
-        evidence.append(f"intent '{intent}' supported by token '{token}'")
+        evidence.append(
+            f"intent '{intent}' supported by token '{token}'"
+        )
 
-    # query_hits are the overlap set; only add if not already covered.
     covered = " ".join(evidence).lower()
+
     for term in query_hits:
         if term not in covered:
-            evidence.append(f"query term '{term}' appears in file metadata")
+            evidence.append(
+                f"query term '{term}' appears in file metadata"
+            )
 
     return _unique(evidence)
 
 
-def _best_import(term: str, imports: list[str]) -> str | None:
+def _best_import(
+    term: str,
+    imports: list[str],
+) -> str | None:
     for item in imports:
-        if _term_matches(term, _import_tokens([item])):
+        if _term_matches(
+            term,
+            _import_tokens([item]),
+        ):
             return str(item)
+
     return None
 
 
-def _best_symbol(term: str, names: list[str]) -> str | None:
+def _best_symbol(
+    term: str,
+    names: list[str],
+) -> str | None:
     for name in names:
-        pieces = {name.lower(), *_split_identifier(name)}
+        pieces = {
+            name.lower(),
+            *_split_identifier(name),
+        }
+
         if _term_matches(term, pieces):
             return name
+
     return None
 
 
-def _reason(matched: list[str], score: int, intent: str) -> str:
+def _reason(
+    matched: list[str],
+    score: int,
+    intent: str,
+    role_adjustment: int = 0,
+) -> str:
     if not matched:
         return f"Little structural overlap with the {intent} query"
+
     if score >= 70:
-        return f"Strong structural match for {intent}"
-    if score >= 40:
-        return f"Partial structural match for {intent}"
-    return f"Weak structural match for {intent}"
+        base = f"Strong structural match for {intent}"
+    elif score >= 40:
+        base = f"Partial structural match for {intent}"
+    else:
+        base = f"Weak structural match for {intent}"
+
+    if role_adjustment > 0:
+        return f"{base}; implementation role prioritized"
+
+    if role_adjustment < 0:
+        return f"{base}; test role deprioritized"
+
+    return base
 
 
 def _unique(values: list[str]) -> list[str]:
     seen: set[str] = set()
     result: list[str] = []
+
     for value in values:
         if value and value not in seen:
             seen.add(value)
             result.append(value)
+
     return result

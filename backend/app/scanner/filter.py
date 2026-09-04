@@ -21,6 +21,14 @@ IGNORE_EXTENSIONS = {
     ".lock",
 }
 
+IGNORE_FILENAMES = {
+    ".env",
+    ".env.local",
+    ".env.development",
+    ".env.production",
+    ".env.test",
+}
+
 BINARY_MEDIA_EXTENSIONS = {
     ".png",
     ".jpg",
@@ -133,8 +141,12 @@ class FileFilter:
         """Return a human-readable removal reason, or None to keep the file."""
         path = str(file_entry.get("path", ""))
         extension = self._extension(file_entry, path)
+        filename = Path(path).name.lower()
         size = file_entry.get("size", 0)
         file_type = str(file_entry.get("file_type", "other"))
+
+        if filename in IGNORE_FILENAMES:
+            return "ignored filename"
 
         if extension in IGNORE_EXTENSIONS:
             return "ignored extension"
