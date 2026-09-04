@@ -1,8 +1,5 @@
-from fastapi import FastAPI
+"""Entrypoint re-exporting the ContextForge FastAPI application."""
 
-app = FastAPI(title="ContextForge API")
+from app.main import app, home
 
-
-@app.get("/")
-def home():
-    return {"message": "ContextForge backend is running!"}
+__all__ = ["app", "home"]
