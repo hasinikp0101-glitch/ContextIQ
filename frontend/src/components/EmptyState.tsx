@@ -15,8 +15,9 @@ export function EmptyState({ hasScan, busy }: { hasScan: boolean; busy: boolean 
         <div className="max-w-md space-y-2">
           <h2 className="text-[15px] font-semibold text-ink">Nothing analyzed yet</h2>
           <p className="text-[13px] leading-relaxed text-ink-muted">
-            Point ContextForge at a repository and ask a development question. We&rsquo;ll determine
-            which files actually matter.
+            Point ContextForge at a local repository path or a public GitHub URL and
+            ask a development question. We&rsquo;ll determine which files actually
+            matter.
           </p>
         </div>
 

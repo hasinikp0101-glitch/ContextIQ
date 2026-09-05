@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 # ---------------------------------------------------------------------------
@@ -25,14 +25,30 @@ class HealthResponse(BaseModel):
 class ProjectAnalyzeRequest(BaseModel):
     """Request payload for /api/projects/analyze."""
 
-    project_path: str = Field(
-        ...,
-        description="Absolute or relative path to the project root directory.",
+    project_path: str | None = Field(
+        default=None,
+        description="Local path to the project root directory.",
     )
     max_file_size_bytes: int = Field(
         default=1_048_576,
         description="Maximum file size in bytes to include for analysis.",
     )
+    repository_url: str | None = Field(
+        default=None,
+        description=(
+            "Public GitHub repository URL (https://github.com/{owner}/{repo}). "
+            "Downloaded to a temporary directory for the pipeline; takes "
+            "precedence over project_path when both are supplied."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _require_project_source(self) -> "ProjectAnalyzeRequest":
+        if not (self.project_path and self.project_path.strip()) and not (
+            self.repository_url and self.repository_url.strip()
+        ):
+            raise ValueError("Provide either project_path or repository_url.")
+        return self
 
 
 class FileAnalysisItem(BaseModel):
@@ -110,8 +126,8 @@ class CompressorOptionsRequest(BaseModel):
 class ContextOptimizeRequest(BaseModel):
     """Request payload for /api/context/optimize."""
 
-    project_path: str = Field(
-        ...,
+    project_path: str | None = Field(
+        default=None,
         description="Path to the repository to optimize context for.",
     )
     query: str = Field(
@@ -122,6 +138,14 @@ class ContextOptimizeRequest(BaseModel):
         default=4000,
         description="Maximum prompt token budget for selected context.",
     )
+    repository_url: str | None = Field(
+        default=None,
+        description=(
+            "Public GitHub repository URL (https://github.com/{owner}/{repo}). "
+            "Downloaded to a temporary directory for the pipeline; takes "
+            "precedence over project_path when both are supplied."
+        ),
+    )
     pricing: PricingConfigRequest | None = Field(
         default=None,
         description="Optional pricing model for cost calculation.",
@@ -130,6 +154,14 @@ class ContextOptimizeRequest(BaseModel):
         default=None,
         description="Optional compressor configuration.",
     )
+
+    @model_validator(mode="after")
+    def _require_project_source(self) -> "ContextOptimizeRequest":
+        if not (self.project_path and self.project_path.strip()) and not (
+            self.repository_url and self.repository_url.strip()
+        ):
+            raise ValueError("Provide either project_path or repository_url.")
+        return self
 
 
 class QueryAnalysisResponse(BaseModel):

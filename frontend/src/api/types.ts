@@ -18,8 +18,9 @@ export interface HealthResponse {
 // ---------------------------------------------------------------------------
 
 export interface ProjectAnalyzeRequest {
-  project_path: string;
+  project_path?: string | null;
   max_file_size_bytes?: number;
+  repository_url?: string | null;
 }
 
 export interface FileAnalysisItem {
@@ -77,9 +78,10 @@ export interface CompressorOptionsRequest {
 }
 
 export interface ContextOptimizeRequest {
-  project_path: string;
+  project_path?: string | null;
   query: string;
   token_budget?: number;
+  repository_url?: string | null;
   pricing?: PricingConfigRequest | null;
   compressor_options?: CompressorOptionsRequest | null;
 }

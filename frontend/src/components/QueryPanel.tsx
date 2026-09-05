@@ -7,6 +7,8 @@ const EXAMPLE_QUERIES = [
   "Why did the auth tests start failing?",
 ];
 
+const EXAMPLE_GITHUB_REPO = "https://github.com/tsungtwu/flask-example";
+
 const BUDGET_PRESETS = [2000, 4000, 8000, 16000];
 
 export interface QueryPanelProps {
@@ -44,7 +46,7 @@ export function QueryPanel({
 
   const handleAnalyze = () => {
     if (!repoPath.trim()) {
-      setPathError("Enter a repository path first.");
+      setPathError("Enter a repository path or public GitHub URL first.");
       setQueryError(null);
       return;
     }
@@ -56,7 +58,7 @@ export function QueryPanel({
   const handleOptimize = () => {
     let invalid = false;
     if (!repoPath.trim()) {
-      setPathError("Repository path is required.");
+      setPathError("Repository path or GitHub URL is required.");
       invalid = true;
     }
     if (!question.trim()) {
@@ -95,7 +97,7 @@ export function QueryPanel({
 
         <div>
           <label htmlFor="repo-path" className="field-label">
-            Repository path
+            Repository path or GitHub URL
           </label>
           <input
             id="repo-path"
@@ -103,7 +105,7 @@ export function QueryPanel({
             className="input font-mono"
             spellCheck={false}
             autoComplete="off"
-            placeholder="C:\path\to\repo  or  /home/you/repo"
+            placeholder="C:\path\to\repo  ·  https://github.com/owner/repo"
             value={repoPath}
             onChange={(e) => {
               onRepoPathChange(e.target.value);
@@ -111,6 +113,19 @@ export function QueryPanel({
             }}
           />
           {pathError && <p className="mt-1.5 text-[11px] text-danger">{pathError}</p>}
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            <span className="text-[10px] font-medium uppercase tracking-[0.06em] text-ink-faint">
+              local folder or public repo
+            </span>
+            <button
+              type="button"
+              onClick={() => onRepoPathChange(EXAMPLE_GITHUB_REPO)}
+              className="chip transition-colors hover:border-accent/50 hover:text-ink"
+              title={EXAMPLE_GITHUB_REPO}
+            >
+              try: tsungtwu/flask-example
+            </button>
+          </div>
         </div>
 
         <div>

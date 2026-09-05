@@ -21,6 +21,22 @@ import { EmptyState } from "./components/EmptyState";
 const PIPELINE_STAGE_COUNT = 6;
 const LAST_SELECTING_STAGE = 4; // index of "Compressing"; "Ready" lights up on success
 
+const GITHUB_URL_PATTERN = /^https:\/\/github\.com\//i;
+
+/**
+ * The backend accepts either a local path or a public GitHub URL (never both).
+ * GitHub URLs are sent as repository_url so the server downloads the repo;
+ * everything else stays a local project_path.
+ */
+function projectSourceFields(
+  repoPath: string,
+): { project_path: string } | { repository_url: string } {
+  const value = repoPath.trim();
+  return GITHUB_URL_PATTERN.test(value)
+    ? { repository_url: value }
+    : { project_path: value };
+}
+
 interface PipelineState {
   status: PipelineStatus;
   activeIndex: number;
@@ -78,7 +94,7 @@ export function App() {
     );
 
     try {
-      const result = await api.analyzeProject({ project_path: repoPath.trim() });
+      const result = await api.analyzeProject(projectSourceFields(repoPath));
       setAnalyzeResult(result);
       setPipeline((p) =>
         p.status === "done" ? p : { status: "idle", activeIndex: 0, completedCount: 2 },
@@ -115,7 +131,7 @@ export function App() {
 
     try {
       const result = await api.optimizeContext({
-        project_path: repoPath.trim(),
+        ...projectSourceFields(repoPath),
         query: question.trim(),
         token_budget: tokenBudget > 0 ? tokenBudget : 4000,
       });
